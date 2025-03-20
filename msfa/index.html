@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Yamaha DX7</title>
+    <style>
+      body {
+        background: #000;
+        color: #fff;
+      }
+
+      div {
+        width: 100%;
+        padding: 25px;
+        border: 1px solid red;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <label for="cartridge-file-input">Load cartridge</label>
+      <input id="cartridge-file-input" type="file" />
+      <select id="patch"></select>
+    </div>
+    <div>
+      <label for="midi-file-input">Load midi file</label>
+      <input id="midi-file-input" type="file" />
+    </div>
+    <script async type="text/javascript" src="emulator.js"></script>
+    <script async type="text/javascript" src="midi-parser.js"></script>
+    <script type="text/javascript">
+      const cartridgeFileInput = document.querySelector('input#cartridge-file-input');
+      const midiFileInput = document.querySelector('input#midi-file-input');
+      const patch = document.querySelector('select#patch');
+      window.Module = {
+        onRuntimeInitialized: () => {
+          const processMidiPacket = Module.cwrap('ProcessMidiPacket', null, ['number', 'number', 'number'])
+
+          patch.addEventListener('change', (e) => {
+            const option = patch.selectedOptions[0];
+            const size = 2;
+            const ptr = Module._malloc(size);
+            const copy = new Uint8Array(HEAPU8.buffer, ptr, size);
+            copy[0] = 0xc0;
+            copy[1] = Number(option.value);
+            processMidiPacket(ptr, size, 0);
+            Module._free(ptr);
+          });
+
+          cartridgeFileInput.addEventListener('change', (e) => {
+            let [file] = cartridgeFileInput.files;
+
+            if (file) {
+              const reader = new FileReader();
+              reader.addEventListener('load', () => {
+                const buffer = new Uint8Array(reader.result);
+                const patchBytes = 128;
+                const patchNameLength = 8;
+                const patches = Math.floor(buffer.length / patchBytes);
+                patch.options.length = 0;
+                for (let i = 0; i < patches; i++) {
+                  const offset = i * patchBytes;
+                  const patchName = buffer.slice(offset + 124, offset + 134);
+                  const option = new Option(new TextDecoder().decode(patchName), i);
+                  patch.add(option);
+                }
+                const ptr = Module._malloc(buffer.length);
+                const copy = new Uint8Array(HEAPU8.buffer, ptr, buffer.length);
+                copy.set(buffer);
+                processMidiPacket(ptr, buffer.length, 0);
+                Module._free(ptr);
+              });
+
+              reader.readAsArrayBuffer(file);
+            }
+          });
+
+          midiFileInput.addEventListener('change', (e) => {
+            let [file] = midiFileInput.files;
+
+            if (file) {
+              const reader = new FileReader();
+              reader.addEventListener('load', () => {
+                const buffer = new Uint8Array(reader.result);
+                const parsed = MidiParser.parse(buffer);
+                console.log(parsed);
+              });
+
+              reader.readAsArrayBuffer(file);
+            }
+          });
+
+          let midi = null;
+          function onMIDISuccess(midiAccess) {
+            startLoggingMIDIInput(midiAccess);
+          }
+
+          function onMIDIFailure(msg) {
+            console.error(`Failed to get MIDI access - ${msg}`);
+          }
+
+          function onMIDIMessage(event) {
+            if (event.data.byteLength === 1) { return; }
+            const ptr = Module._malloc(event.data.byteLength);
+            const copy = new Uint8Array(HEAPU8.buffer, ptr, event.data.byteLength);
+            copy.set(event.data);
+            processMidiPacket(ptr, event.data.byteLength, 1);
+            Module._free(ptr);
+          }
+
+          function startLoggingMIDIInput(midiAccess) {
+            midiAccess.inputs.forEach((entry) => {
+              entry.onmidimessage = onMIDIMessage;
+            });
+          }
+
+          navigator.requestMIDIAccess().then(onMIDISuccess, onMIDIFailure);
+        },
+      };
+    </script>
+  </body>
+</html>
