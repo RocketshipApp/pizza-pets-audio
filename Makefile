@@ -30,7 +30,7 @@ build:
 	$(MAKE) copy
 
 copy:
-	cp index.html *.js server emulator/
+	cp *.js server emulator/
 
 clean:
 	rm emulator/*
